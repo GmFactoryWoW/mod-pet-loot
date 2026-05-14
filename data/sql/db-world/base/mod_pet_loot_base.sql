@@ -1,0 +1,2 @@
+-- Empty base SQL file for mod-pet-loot
+-- This file is part of the standard AzerothCore module structure.

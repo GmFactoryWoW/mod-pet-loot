@@ -1,0 +1,31 @@
+#
+# Copyright (C) 2016+ AzerothCore <www.azerothcore.org>, released under GNU AGPL v3 license: https://github.com/azerothcore/azerothcore-wotlk/blob/master/LICENSE-AGPL3
+#
+
+[worldserver]
+
+########################################
+# Pet Loot Configuration
+########################################
+#
+#    PetLoot.Enable
+#        Description: Enable or disable the pet loot module.
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled)
+
+PetLoot.Enable = 1
+
+#
+#    PetLoot.PetId
+#        Description: The Entry ID of the NPC mascot (Vanity Pet) that will perform the looting.
+#                     23234 is "Bananas" (TCG Monkey Pet).
+#        Default:     23234
+
+PetLoot.PetId = 23234
+
+#
+#    PetLoot.Radius
+#        Description: The maximum distance (in yards) between the player and the corpse for the pet to loot.
+#        Default:     50.0
+
+PetLoot.Radius = 50.0
