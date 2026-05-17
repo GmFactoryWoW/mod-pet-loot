@@ -74,6 +74,13 @@ public:
         if (uint32 gold = victim->loot.gold)
         {
             player->ModifyMoney(gold);
+
+            // Send standard loot notification
+		    WorldPacket data(SMSG_LOOT_MONEY_NOTIFY, 4 + 1);
+            data << uint32(gold);
+            data << uint8(1); // "You loot..."
+            player->GetSession()->SendPacket(&data);
+
             victim->loot.gold = 0;
             victim->loot.NotifyMoneyRemoved();
         }
