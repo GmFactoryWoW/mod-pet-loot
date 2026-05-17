@@ -7,10 +7,11 @@ It allows the vanity pet **Bananas** (ID 23234) to act as an immersive auto-loot
 ## Features
 - **Visual Movement**: The pet physically runs to the location of the killed creature before looting.
 - **Looting Animation**: Upon reaching the corpse, the pet plays a "Loot" animation (emote) for immersion.
-- **Auto-Loot**: Items and gold are automatically added to the player's inventory using native core logic.
+- **Auto-Loot**: Items and gold are automatically handled using AzerothCore native loot systems, including inventory validation, quest requirements, unique item checks, group loot rules, and gold sharing.
 - **Distance Check**: The pet only loots if the player is within a configurable distance from the corpse (default: 50 yards).
 - **Stability**: Uses `Player::StoreLootItem` to ensure compatibility with unique items, bag space, and quest requirements.
-- **Group Loot Support**: Dynamically respects group loot rules (Need/Greed, Round-Robin, Master Loot). The pet intelligently loots only eligible items (such as personal quest items or items below the quality threshold), leaving active rolls and manual distributions to be resolved by the players.
+- **Group Loot Support**: Fully respects AzerothCore group loot rules (Free For All, Group Loot, Need Before Greed, Master Loot, Round-Robin). The pet automatically triggers the appropriate loot system exactly once, shares gold correctly between nearby group members, and leaves active loot rolls and master-loot distributions fully managed by the core.
+- **Safe Group Roll Handling**: Prevents duplicate Need/Greed or Master Loot rolls when players manually open the corpse after the pet has already initialized the loot.
 - **Configurable**: You can enable/disable the module, change the Pet ID, and adjust the looting radius via the config file.
 
 ## Requirements
