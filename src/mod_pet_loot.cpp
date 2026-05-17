@@ -65,7 +65,8 @@ public:
         {
             if (auto cTemplate = victim->GetCreatureTemplate())
             {
-                victim->loot.FillLoot(cTemplate->lootid, LootTemplates_Creature, player, true);
+                bool personal = (player->GetGroup() == nullptr);
+                victim->loot.FillLoot(cTemplate->lootid, LootTemplates_Creature, player, personal);
             }
         }
 
@@ -78,10 +79,46 @@ public:
         }
 
         // Handle Items using core's built-in StoreLootItem
-        // This handles bag space, notifications, quest items, and unique checks automatically
+        uint32 items_count = uint32(victim->loot.items.size());
         uint32 max_slot = victim->loot.GetMaxSlotInLootFor(player);
+
+        Group* group = player->GetGroup();
+        LootMethod lootMethod = group ? group->GetLootMethod() : FREE_FOR_ALL;
+
         for (uint32 i = 0; i < max_slot; ++i)
         {
+            // Quest item slots: StoreLootItem already enforces AllowedForPlayer
+            // and quest requirements — no additional check needed.
+            if (i >= items_count)
+            {
+                InventoryResult msg;
+                player->StoreLootItem(uint8(i), &victim->loot, msg);
+                continue;
+            }
+
+            LootItem& lootItem = victim->loot.items[i];
+
+            if (lootItem.is_looted)
+                continue;
+
+            // In a group with a non-FFA loot method, respect group loot rules.
+            if (group && lootMethod != FREE_FOR_ALL)
+            {
+                // is_underthreshold items are always FFA regardless of loot method.
+                if (!lootItem.is_underthreshold)
+                {
+                    // Skip items pending a Need/Greed/Master roll — players must
+                    // resolve those manually.
+                    if (lootItem.is_blocked)
+                        continue;
+
+                    // Skip items allocated to other players (round-robin / master loot).
+                    const AllowedLooterSet& allowed = lootItem.GetAllowedLooters();
+                    if (!allowed.empty() && !allowed.count(player->GetGUID()))
+                        continue;
+                }
+            }
+
             InventoryResult msg;
             player->StoreLootItem(uint8(i), &victim->loot, msg);
         }

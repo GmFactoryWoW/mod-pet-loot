@@ -10,6 +10,7 @@ It allows the vanity pet **Bananas** (ID 23234) to act as an immersive auto-loot
 - **Auto-Loot**: Items and gold are automatically added to the player's inventory using native core logic.
 - **Distance Check**: The pet only loots if the player is within a configurable distance from the corpse (default: 50 yards).
 - **Stability**: Uses `Player::StoreLootItem` to ensure compatibility with unique items, bag space, and quest requirements.
+- **Group Loot Support**: Dynamically respects group loot rules (Need/Greed, Round-Robin, Master Loot). The pet intelligently loots only eligible items (such as personal quest items or items below the quality threshold), leaving active rolls and manual distributions to be resolved by the players.
 - **Configurable**: You can enable/disable the module, change the Pet ID, and adjust the looting radius via the config file.
 
 ## Requirements
