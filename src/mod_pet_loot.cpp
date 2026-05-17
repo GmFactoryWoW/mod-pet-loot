@@ -11,6 +11,12 @@
 #include "ObjectAccessor.h"
 #include "Group.h"
 #include "Map.h"
+#include "Opcodes.h"
+#include "WorldPacket.h"
+#include "WorldSession.h"
+
+#include <set>
+#include <vector>
 
 // Configuration class to store module settings
 class PetLootConfig
@@ -25,6 +31,10 @@ public:
     bool Enabled;
     uint32 PetId;
     float Radius;
+
+    // Prevents the pet from starting group loot rolls multiple times
+    // for the same creature corpse.
+    std::set<ObjectGuid> GroupLootStarted;
 
     void Load()
     {
@@ -53,11 +63,9 @@ public:
         if (!victim || !pet)
             return true;
 
-        // Ensure they are on the same map
         if (pet->GetMap() != player->GetMap())
             return true;
 
-        // Visual feedback: Pet loots
         pet->HandleEmoteCommand(EMOTE_ONESHOT_LOOT);
 
         // Fill loot if empty
@@ -70,32 +78,100 @@ public:
             }
         }
 
-        // Handle Gold
-        if (uint32 gold = victim->loot.gold)
-        {
-            player->ModifyMoney(gold);
-
-            // Send standard loot notification
-		    WorldPacket data(SMSG_LOOT_MONEY_NOTIFY, 4 + 1);
-            data << uint32(gold);
-            data << uint8(1); // "You loot..."
-            player->GetSession()->SendPacket(&data);
-
-            victim->loot.gold = 0;
-            victim->loot.NotifyMoneyRemoved();
-        }
-
-        // Handle Items using core's built-in StoreLootItem
-        uint32 items_count = uint32(victim->loot.items.size());
-        uint32 max_slot = victim->loot.GetMaxSlotInLootFor(player);
+        // Mark corpse loot as already initialized.
+        // This must be done even if FillLoot was not called,
+        // otherwise manual looting will start group rolls again.
+        victim->loot.loot_type = LOOT_CORPSE;
 
         Group* group = player->GetGroup();
         LootMethod lootMethod = group ? group->GetLootMethod() : FREE_FOR_ALL;
 
+        // Trigger group loot system once.
+        if (group && lootMethod != FREE_FOR_ALL)
+        {
+            auto& startedLoots = PetLootConfig::instance()->GroupLootStarted;
+
+            if (!startedLoots.count(victim->GetGUID()))
+            {
+                switch (lootMethod)
+                {
+                    case GROUP_LOOT:
+                        group->GroupLoot(&victim->loot, victim);
+                        break;
+
+                    case NEED_BEFORE_GREED:
+                        group->NeedBeforeGreed(&victim->loot, victim);
+                        break;
+
+                    case MASTER_LOOT:
+                        group->MasterLoot(&victim->loot, victim);
+                        break;
+
+                    default:
+                        break;
+                }
+
+                startedLoots.insert(victim->GetGUID());
+            }
+        }
+
+        // Handle Gold
+        if (uint32 gold = victim->loot.gold)
+        {
+            victim->loot.NotifyMoneyRemoved();
+
+            if (group)
+            {
+                std::vector<Player*> playersNear;
+
+                for (GroupReference* itr = group->GetFirstMember(); itr != nullptr; itr = itr->next())
+                {
+                    Player* member = itr->GetSource();
+                    if (!member)
+                        continue;
+
+                    if (player->IsAtLootRewardDistance(member))
+                        playersNear.push_back(member);
+                }
+
+                if (!playersNear.empty())
+                {
+                    uint32 goldPerPlayer = uint32(gold / playersNear.size());
+
+                    for (Player* member : playersNear)
+                    {
+                        member->ModifyMoney(goldPerPlayer);
+                        member->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, goldPerPlayer);
+
+                        WorldPacket data(SMSG_LOOT_MONEY_NOTIFY, 4 + 1);
+                        data << uint32(goldPerPlayer);
+                        data << uint8(playersNear.size() > 1 ? 0 : 1);
+                        member->SendDirectMessage(&data);
+                    }
+                }
+            }
+            else
+            {
+                player->ModifyMoney(gold);
+                player->UpdateAchievementCriteria(ACHIEVEMENT_CRITERIA_TYPE_LOOT_MONEY, gold);
+
+                // Send standard loot notification
+                WorldPacket data(SMSG_LOOT_MONEY_NOTIFY, 4 + 1);
+                data << uint32(gold);
+                data << uint8(1); // "You loot..."
+                player->GetSession()->SendPacket(&data);
+            }
+
+            victim->loot.gold = 0;
+        }
+
+        // Handle Items
+        uint32 items_count = uint32(victim->loot.items.size());
+        uint32 max_slot = victim->loot.GetMaxSlotInLootFor(player);
+
         for (uint32 i = 0; i < max_slot; ++i)
         {
-            // Quest item slots: StoreLootItem already enforces AllowedForPlayer
-            // and quest requirements — no additional check needed.
+            // Quest item slots
             if (i >= items_count)
             {
                 InventoryResult msg;
@@ -108,23 +184,14 @@ public:
             if (lootItem.is_looted)
                 continue;
 
-            // In a group with a non-FFA loot method, respect group loot rules.
-            if (group && lootMethod != FREE_FOR_ALL)
-            {
-                // is_underthreshold items are always FFA regardless of loot method.
-                if (!lootItem.is_underthreshold)
-                {
-                    // Skip items pending a Need/Greed/Master roll — players must
-                    // resolve those manually.
-                    if (lootItem.is_blocked)
-                        continue;
+            // Items under roll / master loot must stay handled by the group system.
+            if (lootItem.is_blocked)
+                continue;
 
-                    // Skip items allocated to other players (round-robin / master loot).
-                    const AllowedLooterSet& allowed = lootItem.GetAllowedLooters();
-                    if (!allowed.empty() && !allowed.count(player->GetGUID()))
-                        continue;
-                }
-            }
+            // Skip items allocated to other players (round-robin / master loot).
+            const AllowedLooterSet& allowed = lootItem.GetAllowedLooters();
+            if (!allowed.empty() && !allowed.count(player->GetGUID()))
+                continue;
 
             InventoryResult msg;
             player->StoreLootItem(uint8(i), &victim->loot, msg);
@@ -133,6 +200,8 @@ public:
         // Cleanup corpse visual and decay if empty
         if (victim->loot.isLooted())
         {
+            PetLootConfig::instance()->GroupLootStarted.erase(victim->GetGUID());
+
             victim->RemoveFlag(UNIT_DYNAMIC_FLAGS, UNIT_DYNFLAG_LOOTABLE);
             victim->AllLootRemovedFromCorpse();
         }
